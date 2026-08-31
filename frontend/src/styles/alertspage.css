@@ -1,0 +1,15 @@
+.alerts-page {
+  height: 100%;
+}
+
+.alerts-content {
+  height: calc(100vh - 180px);
+  min-height: 500px;
+}
+
+@media (max-width: 768px) {
+  .alerts-content {
+    height: auto;
+    min-height: 400px;
+  }
+}
