@@ -1,0 +1,244 @@
+# =============================================================================
+# IBVAP Backend - Prometheus Alerting Rules
+# =============================================================================
+# These rules define alerts for critical system and application metrics.
+# Load these in Prometheus by adding to rule_files in prometheus.yml:
+#   rule_files:
+#     - '/etc/prometheus/rules/*.yml'
+# =============================================================================
+
+groups:
+  - name: ibvap_backend_alerts
+    interval: 30s
+    rules:
+      # High-level service health
+      - alert: IBVAPBackendDown
+        expr: up{job="ibvap-backend"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          component: backend
+        annotations:
+          summary: "IBVAP Backend is down"
+          description: "Backend service has been unreachable for more than 1 minute."
+          runbook_url: "https://github.com/your-org/ibvap/wiki/BackendDown"
+
+      - alert: IBVAPBackendDegraded
+        expr: up{job="ibvap-backend"} == 1 and ibvap_model_healthy{model="yolo"} == 0
+        for: 2m
+        labels:
+          severity: warning
+          component: backend
+        annotations:
+          summary: "IBVAP Backend model unhealthy"
+          description: "YOLO model health check failed. Inference may not work correctly."
+          runbook_url: "https://github.com/your-org/ibvap/wiki/ModelUnhealthy"
+
+      # Request latency
+      - alert: IBVAPHighRequestLatency
+        expr: histogram_quantile(0.95, sum(rate(ibvap_request_duration_seconds_bucket[5m])) by (le, endpoint)) > 5
+        for: 5m
+        labels:
+          severity: warning
+          component: api
+        annotations:
+          summary: "High API request latency (p95 > 5s)"
+          description: "95th percentile request latency for {{ $labels.endpoint }} is {{ $value | humanizeDuration }}."
+
+      - alert: IBVAPVeryHighRequestLatency
+        expr: histogram_quantile(0.99, sum(rate(ibvap_request_duration_seconds_bucket[5m])) by (le, endpoint)) > 15
+        for: 2m
+        labels:
+          severity: critical
+          component: api
+        annotations:
+          summary: "Very high API request latency (p99 > 15s)"
+          description: "99th percentile request latency for {{ $labels.endpoint }} is {{ $value | humanizeDuration }}."
+
+      # Error rate
+      - alert: IBVAPHighErrorRate
+        expr: |
+          sum(rate(ibvap_requests_total{status=~"5.."}[5m])) by (endpoint)
+          /
+          sum(rate(ibvap_requests_total[5m])) by (endpoint)
+          > 0.05
+        for: 3m
+        labels:
+          severity: warning
+          component: api
+        annotations:
+          summary: "High error rate (>5%) on {{ $labels.endpoint }}"
+          description: "Error rate for {{ $labels.endpoint }} is {{ $value | humanizePercentage }}."
+
+      - alert: IBVAPCriticalErrorRate
+        expr: |
+          sum(rate(ibvap_requests_total{status=~"5.."}[5m])) by (endpoint)
+          /
+          sum(rate(ibvap_requests_total[5m])) by (endpoint)
+          > 0.20
+        for: 1m
+        labels:
+          severity: critical
+          component: api
+        annotations:
+          summary: "Critical error rate (>20%) on {{ $labels.endpoint }}"
+          description: "Error rate for {{ $labels.endpoint }} is {{ $value | humanizePercentage }}."
+
+      # WebSocket connections
+      - alert: IBVAPHighWSConnections
+        expr: ibvap_websocket_connections > 100
+        for: 5m
+        labels:
+          severity: warning
+          component: websocket
+        annotations:
+          summary: "High WebSocket connection count"
+          description: "Active WebSocket connections: {{ $value }}. Consider scaling backend."
+
+      - alert: IBVAPNoWSConnections
+        expr: ibvap_websocket_connections == 0
+        for: 10m
+        labels:
+          severity: info
+          component: websocket
+        annotations:
+          summary: "No active WebSocket connections"
+          description: "No WebSocket clients connected for 10 minutes."
+
+      # Inference latency
+      - alert: IBVAPHighInferenceLatency
+        expr: histogram_quantile(0.95, sum(rate(ibvap_inference_duration_seconds_bucket[5m])) by (le, model)) > 1
+        for: 5m
+        labels:
+          severity: warning
+          component: inference
+        annotations:
+          summary: "High model inference latency (p95 > 1s)"
+          description: "95th percentile inference latency for {{ $labels.model }} is {{ $value | humanizeDuration }}."
+
+      - alert: IBVAPVeryHighInferenceLatency
+        expr: histogram_quantile(0.99, sum(rate(ibvap_inference_duration_seconds_bucket[5m])) by (le, model)) > 3
+        for: 2m
+        labels:
+          severity: critical
+          component: inference
+        annotations:
+          summary: "Very high model inference latency (p99 > 3s)"
+          description: "99th percentile inference latency for {{ $labels.model }} is {{ $value | humanizeDuration }}."
+
+      # Detection alerts
+      - alert: IBVAPDetectionDrop
+        expr: rate(ibvap_detections_total[5m]) < 0.1
+        for: 10m
+        labels:
+          severity: warning
+          component: detection
+        annotations:
+          summary: "Detection rate dropped significantly"
+          description: "Detection rate is {{ $value | humanize }}/sec. Camera feed may be down or model failing."
+
+      - alert: IBVAPHighDetectionRate
+        expr: rate(ibvap_detections_total[5m]) > 1000
+        for: 5m
+        labels:
+          severity: info
+          component: detection
+        annotations:
+          summary: "Unusually high detection rate"
+          description: "Detection rate is {{ $value | humanize }}/sec. Check for false positives or camera issues."
+
+      # GPU memory
+      - alert: IBVAPGPUMemoryHigh
+        expr: |
+          (nvidia_gpu_memory_used_bytes / nvidia_gpu_memory_total_bytes) > 0.9
+        for: 5m
+        labels:
+          severity: warning
+          component: gpu
+        annotations:
+          summary: "GPU memory usage > 90%"
+          description: "GPU memory is at {{ $value | humanizePercentage }}. Risk of OOM errors."
+
+      - alert: IBVAPGPUMemoryCritical
+        expr: |
+          (nvidia_gpu_memory_used_bytes / nvidia_gpu_memory_total_bytes) > 0.98
+        for: 2m
+        labels:
+          severity: critical
+          component: gpu
+        annotations:
+          summary: "GPU memory usage > 98%"
+          description: "GPU memory is critically high at {{ $value | humanizePercentage }}. Immediate action required."
+
+      # System resources (from node-exporter)
+      - alert: IBVAPHighCPUUsage
+        expr: 100 - (avg by(instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 85
+        for: 10m
+        labels:
+          severity: warning
+          component: system
+        annotations:
+          summary: "High CPU usage on {{ $labels.instance }}"
+          description: "CPU usage is {{ $value | humanizePercentage }} for more than 10 minutes."
+
+      - alert: IBVAPHighMemoryUsage
+        expr: (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100 > 85
+        for: 10m
+        labels:
+          severity: warning
+          component: system
+        annotations:
+          summary: "High memory usage on {{ $labels.instance }}"
+          description: "Memory usage is {{ $value | humanizePercentage }} for more than 10 minutes."
+
+      - alert: IBVAPDiskSpaceLow
+        expr: (node_filesystem_avail_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"}) * 100 < 10
+        for: 5m
+        labels:
+          severity: critical
+          component: system
+        annotations:
+          summary: "Disk space critically low on {{ $labels.instance }}"
+          description: "Root filesystem has less than 10% free space ({{ $value | humanizePercentage }})."
+
+      # Database alerts (if postgres-exporter deployed)
+      - alert: IBVAPPostgresDown
+        expr: pg_up == 0
+        for: 1m
+        labels:
+          severity: critical
+          component: database
+        annotations:
+          summary: "PostgreSQL is down"
+          description: "PostgreSQL server has been unreachable for more than 1 minute."
+
+      - alert: IBVAPPostgresHighConnections
+        expr: (pg_stat_database_numbackends / pg_settings_max_connections) * 100 > 80
+        for: 5m
+        labels:
+          severity: warning
+          component: database
+        annotations:
+          summary: "PostgreSQL connection usage > 80%"
+          description: "PostgreSQL is using {{ $value | humanizePercentage }} of max connections."
+
+      # Redis alerts (if redis-exporter deployed)
+      - alert: IBVAPRedisDown
+        expr: redis_up == 0
+        for: 1m
+        labels:
+          severity: critical
+          component: cache
+        annotations:
+          summary: "Redis is down"
+          description: "Redis server has been unreachable for more than 1 minute."
+
+      - alert: IBVAPRedisMemoryHigh
+        expr: (redis_memory_used_bytes / redis_memory_max_bytes) * 100 > 85
+        for: 5m
+        labels:
+          severity: warning
+          component: cache
+        annotations:
+          summary: "Redis memory usage > 85%"
+          description: "Redis is using {{ $value | humanizePercentage }} of max memory."

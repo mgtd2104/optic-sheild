@@ -180,10 +180,18 @@ class TestContainerIntegration:
         assert "detections" in data
     
     def test_auth_token_endpoint(self):
-        """Test JWT token creation."""
+        """Test registration, login, and token verification."""
+        requests.post(
+            f"{self.BASE_URL}/api/auth/register",
+            json={
+                "username": "integration_test",
+                "email": "integration_test@ibvap.test",
+                "password": "testpass123",
+            }
+        )
         response = requests.post(
-            f"{self.BASE_URL}/auth/token",
-            json={"username": "integration_test", "password": "testpass"}
+            f"{self.BASE_URL}/api/auth/login",
+            json={"username": "integration_test", "password": "testpass123"}
         )
         assert response.status_code == 200
         data = response.json()
@@ -193,7 +201,7 @@ class TestContainerIntegration:
         # Verify token works
         token = data["access_token"]
         response = requests.post(
-            f"{self.BASE_URL}/auth/verify",
+            f"{self.BASE_URL}/api/auth/verify",
             headers={"Authorization": f"Bearer {token}"}
         )
         assert response.status_code == 200

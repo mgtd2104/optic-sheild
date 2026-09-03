@@ -25,6 +25,7 @@ export interface LiveAlert {
 
 export interface User {
   name: string;
+  email: string;
   role: string;
   bopLocation: string;
 }

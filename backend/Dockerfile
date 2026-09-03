@@ -32,7 +32,8 @@ RUN pip install --no-cache-dir --upgrade pip setuptools wheel
 
 # Copy requirements first for better caching
 COPY requirements.txt /tmp/requirements.txt
-RUN pip install --no-cache-dir -r /tmp/requirements.txt
+RUN pip install --no-cache-dir -r /tmp/requirements.txt \
+    --extra-index-url https://download.pytorch.org/whl/cu121
 
 # ---- Runtime Stage ----------------------------------------------------------
 FROM nvidia/cuda:12.1-runtime-ubuntu22.04 AS runtime
@@ -48,8 +49,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libgomp1 \
     nginx \
     curl \
+    netcat-openbsd \
     ca-certificates \
+    authbind \
     && rm -rf /var/lib/apt/lists/*
+
+# Configure authbind for nginx to bind to ports 80/443 as non-root
+RUN echo "0.0.0.0/0,80" > /etc/authbind/byport/80 && \
+    echo "0.0.0.0/0,443" > /etc/authbind/byport/443 && \
+    chmod 755 /etc/authbind/byport/80 /etc/authbind/byport/443
 
 # Copy virtual environment from builder
 COPY --from=builder /opt/venv /opt/venv
@@ -71,13 +79,17 @@ RUN mkdir -p /app/models /app/logs /app/temp /app/uploads && \
 # Copy Nginx configuration
 COPY nginx.conf /etc/nginx/nginx.conf
 
+# Copy entrypoint script
+COPY --chown=appuser:appuser entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
 # Switch to non-root user
 USER appuser
 
-# Expose ports
-EXPOSE 8000
+# Expose ports (nginx will bind via authbind)
+EXPOSE 8000 80 443
 
-# Health check
+# Health check - curl is installed in runtime stage
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
     CMD curl -f http://localhost:8000/health || exit 1
 
@@ -86,10 +98,6 @@ ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     CUDA_VISIBLE_DEVICES=0 \
     PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:512
-
-# Entry point script
-COPY --chown=appuser:appuser entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
 
 ENTRYPOINT ["/entrypoint.sh"]
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]

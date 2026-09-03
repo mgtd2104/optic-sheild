@@ -94,7 +94,7 @@ jobs:
         run: |
           cd backend
           pip install --upgrade pip
-          pip install -r requirements.txt
+          pip install -r requirements.txt --extra-index-url https://download.pytorch.org/whl/cu121
           pip install pytest pytest-asyncio pytest-cov pytest-mock httpx
 
       - name: Run unit tests
@@ -157,6 +157,7 @@ jobs:
             org.opencontainers.image.licenses=Proprietary
 
       - name: Build and push Docker image
+        id: build
         uses: docker/build-push-action@v5
         with:
           context: ${{ env.CONTEXT }}

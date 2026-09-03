@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 
@@ -14,6 +14,26 @@ interface RegisterFormData {
   confirmPassword: string;
   full_name: string;
 }
+
+interface PasswordStrength {
+  score: number; // 0-4
+  label: string;
+  color: string;
+}
+
+const calculatePasswordStrength = (password: string): PasswordStrength => {
+  let score = 0;
+  if (password.length >= 8) score++;
+  if (/[A-Z]/.test(password)) score++;
+  if (/[a-z]/.test(password)) score++;
+  if (/[0-9]/.test(password)) score++;
+  if (/[^A-Za-z0-9]/.test(password)) score++;
+  
+  const labels = ['Very Weak', 'Weak', 'Fair', 'Strong', 'Very Strong'];
+  const colors = ['#ef4444', '#f97316', '#eab308', '#84cc16', '#22c55e'];
+  
+  return { score: Math.min(score, 4), label: labels[Math.min(score, 4)], color: colors[Math.min(score, 4)] };
+};
 
 export default function LoginPage() {
   const { login, register, isLoading, error } = useAuth();
@@ -35,6 +55,7 @@ export default function LoginPage() {
   });
 
   const [formError, setFormError] = useState<string | null>(null);
+  const [passwordStrength, setPasswordStrength] = useState<PasswordStrength>({ score: 0, label: '', color: '#ef4444' });
 
   const handleLoginSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -56,8 +77,8 @@ export default function LoginPage() {
       return;
     }
 
-    if (registerForm.password.length < 8) {
-      setFormError('Password must be at least 8 characters');
+    if (passwordStrength.score < 3) {
+      setFormError('Password is too weak. Please use a stronger password.');
       return;
     }
 
@@ -74,13 +95,28 @@ export default function LoginPage() {
     }
   };
 
-  const handleInputChange = (
+  const handlePasswordChange = useCallback((value: string) => {
+    setPasswordStrength(calculatePasswordStrength(value));
+  }, []);
+
+  const handleInputChange = <T extends LoginFormData | RegisterFormData>(
     e: React.ChangeEvent<HTMLInputElement>,
-    setter: React.Dispatch<React.SetStateAction<LoginFormData | RegisterFormData>>
+    setter: React.Dispatch<React.SetStateAction<T>>
   ) => {
     const { name, value } = e.target;
     setter(prev => ({ ...prev, [name]: value }));
+    if (name === 'password') handlePasswordChange(value);
   };
+
+  const handleModeSwitch = useCallback(() => {
+    setIsRegister(prev => !prev);
+    setFormError(null);
+    setShowPassword(false);
+    // Reset both forms when switching modes
+    setLoginForm({ username: '', password: '' });
+    setRegisterForm({ username: '', email: '', password: '', confirmPassword: '', full_name: '' });
+    setPasswordStrength({ score: 0, label: '', color: '#ef4444' });
+  }, []);
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-[hsl(var(--background))] relative overflow-hidden">
@@ -304,6 +340,23 @@ export default function LoginPage() {
                     )}
                   </button>
                 </div>
+                {/* Password Strength Indicator */}
+                {registerForm.password && (
+                  <div className="mt-2">
+                    <div className="h-1.5 bg-[hsl(var(--border))] rounded-full overflow-hidden">
+                      <div 
+                        className="h-full transition-all duration-300"
+                        style={{ 
+                          width: `${Math.max((passwordStrength.score / 4) * 100, 10)}%`,
+                          backgroundColor: passwordStrength.color,
+                        }}
+                      />
+                    </div>
+                    <p className="text-xs mt-1" style={{ color: passwordStrength.color }}>
+                      Strength: {passwordStrength.label}
+                    </p>
+                  </div>
+                )}
               </div>
 
               <div>
@@ -358,11 +411,7 @@ export default function LoginPage() {
               {isRegister ? 'Already have an account?' : 'Need an account?'}
               <button
                 type="button"
-                onClick={() => {
-                  setIsRegister(!isRegister);
-                  setFormError(null);
-                  setShowPassword(false);
-                }}
+                onClick={handleModeSwitch}
                 className="ml-2 text-primary font-medium hover:underline focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 focus:ring-offset-[hsl(var(--background))] rounded"
               >
                 {isRegister ? 'Sign In' : 'Register'}

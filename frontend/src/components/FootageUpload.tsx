@@ -2,14 +2,13 @@ import { useState, useCallback, useRef } from 'react';
 import { apiUpload } from '../api/client';
 import '../styles/footageupload.css';
 
-interface UploadedFootage {
+export interface UploadedFootage {
   id: string;
   filename: string;
   url: string;
-  thumbnail?: string;
-  duration?: number;
   size: number;
-  uploadedAt: string;
+  uploaded_at?: string;
+  uploadedAt?: string;
 }
 
 interface FootageUploadProps {
@@ -20,8 +19,10 @@ interface FootageUploadProps {
   acceptedTypes?: string[];
 }
 
-const DEFAULT_MAX_SIZE = 500; // MB
-const DEFAULT_TYPES = ['video/mp4', 'video/webm', 'video/quicktime', 'video/x-msvideo', 'application/octet-stream'];
+// More strict accepted types - removed application/octet-stream which matches everything
+const DEFAULT_MAX_SIZE = 100; // MB; kept in sync with the backend limit
+const DEFAULT_TYPES = ['video/*'];
+const VALID_VIDEO_EXTENSIONS = ['.mp4', '.webm', '.mov', '.avi'];
 
 export default function FootageUpload({
   onUploadComplete,
@@ -37,15 +38,29 @@ export default function FootageUpload({
   const [success, setSuccess] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const cancellerRef = useRef<ReturnType<typeof apiUpload> | null>(null);
+  const xhrRef = useRef<XMLHttpRequest | null>(null);
 
   const validateFile = useCallback((file: File): string | null => {
     if (file.size > maxSizeMB * 1024 * 1024) {
       return `File size exceeds ${maxSizeMB}MB limit`;
     }
-    if (!acceptedTypes.some(type => file.type === type || file.type.startsWith(type.replace('*', '')))) {
+    
+    // Check MIME type
+    const mimeValid = acceptedTypes.some(type => type === 'video/*' ? file.type.startsWith('video/') : file.type === type);
+    
+    // Check file extension as fallback (MIME can be spoofed)
+    const ext = file.name.toLowerCase().substring(file.name.lastIndexOf('.'));
+    const extValid = VALID_VIDEO_EXTENSIONS.includes(ext);
+    
+    if (!mimeValid && !extValid) {
       return 'Invalid file type. Accepted: MP4, WebM, MOV, AVI';
     }
+    
+    // Additional check: reject application/octet-stream unless extension is valid
+    if (file.type === 'application/octet-stream' && !extValid) {
+      return 'Invalid file type. File appears to be a generic binary. Please use MP4, WebM, MOV, or AVI.';
+    }
+    
     return null;
   }, [maxSizeMB, acceptedTypes]);
 
@@ -87,14 +102,16 @@ export default function FootageUpload({
 
     try {
       const metadata: Record<string, string> = {};
-      if (cameraId) metadata.cameraId = cameraId;
-      if (detectionId) metadata.detectionId = detectionId;
+      if (cameraId) metadata.camera_id = cameraId;
+      if (detectionId) metadata.detection_id = detectionId;
 
+      // Video uploads are stored for playback; frame analysis remains separate.
       const result = await apiUpload<UploadedFootage>(
-        '/api/footage/upload',
+        '/footage/upload',
         selectedFile,
         setProgress,
-        metadata
+        metadata,
+        (xhr) => { xhrRef.current = xhr; } // Capture XHR for cancellation
       );
 
       setSuccess(true);
@@ -106,11 +123,16 @@ export default function FootageUpload({
       }
     } finally {
       setUploading(false);
+      xhrRef.current = null;
     }
   };
 
   const handleCancel = () => {
-    // Note: true cancellation would require exposing the XHR from apiUpload
+    // Actual cancellation using XHR abort
+    if (xhrRef.current) {
+      xhrRef.current.abort();
+      xhrRef.current = null;
+    }
     setUploading(false);
     setProgress(0);
     setSelectedFile(null);

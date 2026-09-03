@@ -1,4 +1,20 @@
-import { useRef, useState, useEffect } from 'react';
+import { useRef, useState, useEffect, useCallback } from 'react';
+
+interface StreamAlert {
+  type: string;
+  severity: string;
+  message: string;
+}
+
+interface StreamDetection {
+  confidence: number;
+}
+
+interface AnalysisFrame {
+  frame: string;
+  detections: StreamDetection[];
+  alerts: StreamAlert[];
+}
 
 interface OverlayBox {
   x: number;
@@ -10,26 +26,17 @@ interface OverlayBox {
   type: 'human' | 'vehicle' | 'face' | 'suspicious';
 }
 
-const MOCK_OVERLAYS: OverlayBox[] = [
-  { x: 0.2, y: 0.3, width: 0.15, height: 0.25, label: 'Human', confidence: 0.92, type: 'human' },
-  { x: 0.6, y: 0.4, width: 0.2, height: 0.15, label: 'Vehicle', confidence: 0.87, type: 'vehicle' },
-  { x: 0.8, y: 0.1, width: 0.1, height: 0.1, label: 'Face', confidence: 0.95, type: 'face' },
-];
-
-const TYPE_COLORS: Record<string, string> = {
-  human: '#ef4444',
-  vehicle: '#3b82f6',
-  face: '#f59e0b',
-  suspicious: '#ec4899',
-};
-
 export default function VideoPane({ 
   cameraId = 'CAM-BDR-001',
-  streamUrl = 'https://assets.mixkit.co/videos/preview/mixkit-security-camera-footage-of-a-hallway-33348-large.mp4',
+  streamUrl,
+  analysisWsUrl,
+  analysisFrame: providedAnalysisFrame,
   className = ''
 }: { 
   cameraId?: string; 
   streamUrl?: string;
+  analysisWsUrl?: string;
+  analysisFrame?: AnalysisFrame | null;
   className?: string;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -37,11 +44,54 @@ export default function VideoPane({
   const [playing, setPlaying] = useState(true);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(100);
-  const [volume, setVolume] = useState(1);
+  const [volume, setVolume] = useState(0);
   const [fullscreen, setFullscreen] = useState(false);
   const [showOverlays, setShowOverlays] = useState(true);
-  const [stats, setStats] = useState({ detections: 3, avgConfidence: 92 });
+  const [stats, setStats] = useState({ detections: 0, avgConfidence: 0 });
+  const [analysisFrame, setAnalysisFrame] = useState<AnalysisFrame | null>(null);
+  const [threats, setThreats] = useState<StreamAlert[]>([]);
+  const activeAnalysisFrame = providedAnalysisFrame || analysisFrame;
+  
+  // Refs to avoid stale closures in animation loop
+  const showOverlaysRef = useRef(showOverlays);
+  const animationFrameRef = useRef<number | null>(null);
+  const isMountedRef = useRef(true);
 
+  // Keep refs in sync with state
+  useEffect(() => {
+    showOverlaysRef.current = showOverlays;
+  }, [showOverlays]);
+
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => { isMountedRef.current = false; };
+  }, []);
+
+  useEffect(() => {
+    if (!analysisWsUrl) {
+      setAnalysisFrame(null);
+      return;
+    }
+
+    const socket = new WebSocket(analysisWsUrl);
+    socket.onopen = () => setPlaying(true);
+    socket.onmessage = (event) => {
+      const payload = JSON.parse(event.data) as AnalysisFrame;
+      const detections = payload.detections || [];
+      const average = detections.length
+        ? detections.reduce((sum, detection) => sum + detection.confidence, 0) / detections.length
+        : 0;
+      setAnalysisFrame(payload);
+      setThreats(payload.alerts || []);
+      setStats({ detections: detections.length, avgConfidence: Math.round(average * 100) });
+    };
+    socket.onclose = () => setPlaying(false);
+    socket.onerror = () => setPlaying(false);
+
+    return () => socket.close();
+  }, [analysisWsUrl]);
+
+  // Legacy video fallback controls remain available for browser video sources.
   useEffect(() => {
     const video = videoRef.current;
     const canvas = canvasRef.current;
@@ -51,50 +101,59 @@ export default function VideoPane({
     if (!ctx) return;
 
     const drawOverlays = () => {
-      if (!showOverlays || video.paused || video.ended) return;
+      if (!isMountedRef.current) return;
+      if (!showOverlaysRef.current || video.paused || video.ended) {
+        animationFrameRef.current = requestAnimationFrame(drawOverlays);
+        return;
+      }
       
       canvas.width = video.videoWidth;
       canvas.height = video.videoHeight;
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-      MOCK_OVERLAYS.forEach(box => {
-        const x = box.x * canvas.width;
-        const y = box.y * canvas.height;
-        const w = box.width * canvas.width;
-        const h = box.height * canvas.height;
-
-        const color = TYPE_COLORS[box.type] || '#6b7280';
-
-        // Draw bounding box
-        ctx.strokeStyle = color;
-        ctx.lineWidth = 3;
-        ctx.strokeRect(x, y, w, h);
-
-        // Draw label background
-        const label = `${box.label} ${Math.round(box.confidence * 100)}%`;
-        ctx.font = '13px system-ui, sans-serif';
-        const textMetrics = ctx.measureText(label);
-        const textWidth = textMetrics.width;
-        const textHeight = 18;
-        
-        ctx.fillStyle = color;
-        ctx.fillRect(x, y - textHeight - 4, textWidth + 10, textHeight + 4);
-        
-        // Draw label text
-        ctx.fillStyle = '#ffffff';
-        ctx.fillText(label, x + 5, y - 6);
-      });
-
-      requestAnimationFrame(drawOverlays);
+      animationFrameRef.current = requestAnimationFrame(drawOverlays);
     };
 
-    video.addEventListener('play', drawOverlays);
-    video.addEventListener('pause', () => {});
+    // Start animation loop
+    animationFrameRef.current = requestAnimationFrame(drawOverlays);
     
     return () => {
-      video.removeEventListener('play', drawOverlays);
+      if (animationFrameRef.current) {
+        cancelAnimationFrame(animationFrameRef.current);
+        animationFrameRef.current = null;
+      }
     };
-  }, [showOverlays]);
+  }, []);
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    if (playing) {
+      video.play().catch(() => setPlaying(false));
+    } else {
+      video.pause();
+    }
+  }, [playing]);
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    const onPlay = () => setPlaying(true);
+    const onPause = () => setPlaying(false);
+    video.addEventListener('play', onPlay);
+    video.addEventListener('pause', onPause);
+    return () => {
+      video.removeEventListener('play', onPlay);
+      video.removeEventListener('pause', onPause);
+    };
+  }, []);
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    video.volume = volume;
+    video.muted = volume === 0;
+  }, [volume]);
 
   const handleTimeUpdate = () => {
     const video = videoRef.current;
@@ -124,11 +183,21 @@ export default function VideoPane({
     setFullscreen(!fullscreen);
   };
 
+  const handleVolumeChange = (newVolume: number) => {
+    setVolume(newVolume);
+  };
+
+  const toggleMute = () => {
+    setVolume(v => v > 0 ? 0 : 1);
+  };
+
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
     const secs = Math.floor(seconds % 60);
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
+
+  const isMuted = volume === 0;
 
   return (
     <div className={`videopane bg-[hsl(var(--card))] border border-[hsl(var(--border))] rounded-xl overflow-hidden flex flex-col ${className}`}>
@@ -157,23 +226,37 @@ export default function VideoPane({
 
       {/* Video Container */}
       <div className="relative flex-1 bg-black min-h-[400px]">
-        <video
-          ref={videoRef}
-          className="w-full h-full object-contain"
-          onTimeUpdate={handleTimeUpdate}
-          onLoadedMetadata={handleLoadedMetadata}
-          playsInline
-          crossOrigin="anonymous"
-          muted
-        >
-          <source src={streamUrl} type="video/mp4" />
-          Your browser does not support the video tag.
-        </video>
+        {activeAnalysisFrame ? (
+          <img src={activeAnalysisFrame.frame} className="w-full h-full object-contain" alt="Live AI analyzed video frame" />
+        ) : streamUrl ? (
+          <video
+            ref={videoRef}
+            className="w-full h-full object-contain"
+            onTimeUpdate={handleTimeUpdate}
+            onLoadedMetadata={handleLoadedMetadata}
+            playsInline
+            crossOrigin="anonymous"
+          >
+            <source src={streamUrl} type="video/mp4" />
+            Your browser does not support the video tag.
+          </video>
+        ) : (
+          <div className="flex h-full min-h-[400px] items-center justify-center text-sm font-mono text-white/70">
+            Waiting for live monitoring stream...
+          </div>
+        )}
         <canvas
           ref={canvasRef}
           className="absolute inset-0 w-full h-full pointer-events-none"
           aria-hidden="true"
         />
+
+        {analysisWsUrl && threats.length > 0 && (
+          <div className="absolute bottom-4 left-4 right-4 rounded-lg border border-red-400/60 bg-red-950/85 p-3 text-white shadow-lg" role="alert">
+            <div className="text-xs font-bold uppercase tracking-wider text-red-300">Threat detected</div>
+            <div className="mt-1 text-sm">{threats[0].message}</div>
+          </div>
+        )}
         
         {/* Recording indicator */}
         {playing && (
@@ -229,17 +312,17 @@ export default function VideoPane({
         
         <div className="flex items-center gap-2">
           <button
-            onClick={() => setVolume(v => v > 0 ? 0 : 1)}
-            aria-label={volume > 0 ? 'Mute' : 'Unmute'}
+            onClick={toggleMute}
+            aria-label={isMuted ? 'Unmute' : 'Mute'}
             className="flex items-center justify-center w-10 h-10 rounded-lg bg-[hsl(var(--background))] border border-[hsl(var(--border))] text-[hsl(var(--foreground))] hover:bg-[hsl(var(--muted))] transition-colors focus:outline-none focus:ring-2 focus:ring-primary"
           >
-            {volume > 0 ? (
+            {isMuted ? (
               <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-                <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02z"/>
+                <path d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z"/>
               </svg>
             ) : (
               <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-                <path d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z"/>
+                <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02z"/>
               </svg>
             )}
           </button>
@@ -250,7 +333,7 @@ export default function VideoPane({
             max={1}
             step={0.1}
             value={volume}
-            onChange={e => setVolume(parseFloat(e.target.value))}
+            onChange={e => handleVolumeChange(parseFloat(e.target.value))}
             aria-label="Volume"
           />
         </div>

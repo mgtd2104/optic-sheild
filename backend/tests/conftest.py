@@ -105,10 +105,28 @@ def sample_image_bytes() -> bytes:
 # =============================================================================
 
 def create_jwt_token(username: str = "testuser", secret: str = "test-jwt-secret") -> str:
-    """Create a valid JWT token for testing."""
+    """Create a valid JWT token for testing.
+
+    Also ensures the user exists in main.users_db, since get_current_user
+    looks up the token's `sub` claim there and rejects unknown users
+    regardless of signature validity.
+    """
     from jose import jwt
     from datetime import datetime, timedelta
-    
+    import uuid as uuid_module
+    from main import users_db, get_password_hash
+
+    if username not in users_db:
+        users_db[username] = {
+            "user_id": str(uuid_module.uuid4()),
+            "username": username,
+            "email": f"{username}@ibvap.test",
+            "full_name": "Test User",
+            "hashed_password": get_password_hash("testpass"),
+            "created_at": datetime.utcnow(),
+            "is_active": True,
+        }
+
     expire = datetime.utcnow() + timedelta(minutes=60)
     payload = {
         "sub": username,

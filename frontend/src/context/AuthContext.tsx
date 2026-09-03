@@ -23,6 +23,8 @@ interface AuthResponse {
     username: string;
     email: string;
     full_name: string | null;
+    role?: string;
+    bop_location?: string;
   };
 }
 
@@ -40,6 +42,27 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 const TOKEN_KEY = 'ibvap_token';
 const USER_KEY = 'ibvap_user';
+const DEV_USER: User = {
+  name: 'Local Operator',
+  email: 'local@ibvap.dev',
+  role: 'Operator',
+  bopLocation: 'BOP-01',
+};
+
+function parseJwtExpiry(token: string): number | null {
+  try {
+    const payload = JSON.parse(atob(token.split('.')[1]));
+    return payload.exp ? payload.exp * 1000 : null;
+  } catch {
+    return null;
+  }
+}
+
+function isTokenExpired(token: string): boolean {
+  const expiry = parseJwtExpiry(token);
+  if (!expiry) return true;
+  return Date.now() >= expiry;
+}
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
@@ -50,20 +73,49 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   // Hydrate from localStorage on mount
   useEffect(() => {
-    const storedToken = localStorage.getItem(TOKEN_KEY);
-    const storedUser = localStorage.getItem(USER_KEY);
-    
-    if (storedToken && storedUser) {
-      try {
-        const parsedUser = JSON.parse(storedUser);
-        setUser(parsedUser);
-        setIsAuthenticated(true);
-      } catch {
+    const hydrate = () => {
+      if (import.meta.env.DEV) {
         localStorage.removeItem(TOKEN_KEY);
         localStorage.removeItem(USER_KEY);
+        setUser(DEV_USER);
+        setIsAuthenticated(true);
+        setHydrated(true);
+        return;
       }
-    }
-    setHydrated(true);
+
+      const storedToken = localStorage.getItem(TOKEN_KEY);
+      const storedUser = localStorage.getItem(USER_KEY);
+      
+      if (storedToken && storedUser) {
+        if (isTokenExpired(storedToken)) {
+          localStorage.removeItem(TOKEN_KEY);
+          localStorage.removeItem(USER_KEY);
+          setHydrated(true);
+          return;
+        }
+        try {
+          const parsedUser = JSON.parse(storedUser);
+          setUser(parsedUser);
+          setIsAuthenticated(true);
+        } catch {
+          localStorage.removeItem(TOKEN_KEY);
+          localStorage.removeItem(USER_KEY);
+        }
+      }
+      setHydrated(true);
+    };
+
+    hydrate();
+
+    // Listen for storage changes from other tabs
+    const handleStorageChange = (e: StorageEvent) => {
+      if (e.key === TOKEN_KEY || e.key === USER_KEY) {
+        hydrate();
+      }
+    };
+
+    window.addEventListener('storage', handleStorageChange);
+    return () => window.removeEventListener('storage', handleStorageChange);
   }, []);
 
   const setAuthData = useCallback((token: string, userData: User) => {
@@ -81,6 +133,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setIsAuthenticated(false);
   }, []);
 
+  useEffect(() => {
+    const storedToken = localStorage.getItem(TOKEN_KEY);
+    if (!storedToken) return;
+
+    const expiry = parseJwtExpiry(storedToken);
+    if (!expiry) return;
+
+    const timeout = window.setTimeout(() => {
+      clearAuthData();
+    }, Math.max(0, expiry - Date.now()));
+
+    return () => window.clearTimeout(timeout);
+  }, [isAuthenticated, clearAuthData]);
+
   const register = useCallback(async (data: RegisterData) => {
     setIsLoading(true);
     setError(null);
@@ -92,9 +158,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         password: data.password
       });
       const userData: User = {
-        name: response.full_name || response.username,
-        role: 'Operator',
-        bopLocation: 'BOP-01',
+        name: loginResponse.user.full_name || loginResponse.user.username,
+        email: loginResponse.user.email,
+        role: loginResponse.user.role || 'Operator',
+        bopLocation: loginResponse.user.bop_location || 'BOP-01',
       };
       setAuthData(loginResponse.access_token, userData);
     } catch (err) {
@@ -113,8 +180,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const response = await apiPost<AuthResponse>('/api/auth/login', credentials);
       const userData: User = {
         name: response.user.full_name || response.user.username,
-        role: 'Operator',
-        bopLocation: 'BOP-01',
+        email: response.user.email,
+        role: response.user.role || 'Operator',
+        bopLocation: response.user.bop_location || 'BOP-01',
       };
       setAuthData(response.access_token, userData);
     } catch (err) {

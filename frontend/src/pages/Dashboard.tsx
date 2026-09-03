@@ -4,14 +4,20 @@ import { useLiveAlerts } from '../hooks/useLiveAlerts';
 import VideoPane from '../components/VideoPane';
 import AlertsSidebar from '../components/AlertsSidebar';
 import MapView from '../components/MapView';
+import AlertDetailCard from '../components/AlertDetailCard';
+import { useServerLocation } from '../hooks/useServerLocation';
+import { useDeviceLocation } from '../hooks/useDeviceLocation';
 
 export default function Dashboard() {
   const [selectedAlertId, setSelectedAlertId] = useState<string | null>(null);
-  const { alerts, connected, error, isDemoMode } = useLiveAlerts({
+  const liveWsUrl = `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}/ws/stream?monitor=primary&token=${encodeURIComponent(localStorage.getItem('ibvap_token') || '')}`;
+  const { alerts, connected, error, isDemoMode, streamFrame } = useLiveAlerts({
     maxAlerts: 15,
-    demoMode: true,
-    demoIntervalMs: 6000,
+    demoMode: false,
+    wsUrl: liveWsUrl,
   });
+  const { location: serverLocation, error: serverLocationError } = useServerLocation();
+  const { location: deviceLocation } = useDeviceLocation();
 
   const handleAlertClick = useCallback((alert: LiveAlert) => {
     setSelectedAlertId(alert.id);
@@ -37,12 +43,12 @@ export default function Dashboard() {
           </div>
         </div>
         <div className="flex items-center gap-3">
-          {error && (
+          {(error || serverLocationError) && (
             <span className="text-xs text-destructive flex items-center gap-1">
               <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
               </svg>
-              {error}
+              {error || 'Server location unavailable'}
             </span>
           )}
           {isDemoMode && (
@@ -59,6 +65,7 @@ export default function Dashboard() {
         <section className="w-full lg:w-2/3 flex flex-col min-w-0" aria-label="Video surveillance feed">
           <VideoPane 
             cameraId="CAM-BDR-001"
+            analysisFrame={streamFrame}
             className="h-full"
           />
         </section>
@@ -73,6 +80,8 @@ export default function Dashboard() {
               onAlertClick={handleAlertClick}
               center={[28.9845, 77.7064]}
               zoom={7}
+              serverLocation={serverLocation}
+              deviceLocation={deviceLocation}
             />
           </div>
 
@@ -109,86 +118,5 @@ export default function Dashboard() {
         </div>
       )}
     </main>
-  );
-}
-
-function AlertDetailCard({ alert, onClose }: { alert: LiveAlert; onClose: () => void }) {
-  const severityConfig = {
-    CRITICAL: { color: '#ef4444', bg: '#ef444420' },
-    HIGH: { color: '#f97316', bg: '#f9731620' },
-    MEDIUM: { color: '#eab308', bg: '#eab30820' },
-  }[alert.severity];
-
-  const typeConfig = {
-    INTRUSION: { icon: '🚨', label: 'INTRUSION' },
-    ANPR: { icon: '🚗', label: 'ANPR' },
-    FRS_WATCHLIST: { icon: '👤', label: 'FRS WATCHLIST' },
-    TAMPER: { icon: '🔧', label: 'TAMPER' },
-  }[alert.alertType];
-
-  return (
-    <div className="space-y-4">
-      {/* Header */}
-      <div className="flex items-center gap-3 p-3 rounded-lg border" style={{ borderColor: severityConfig.color, backgroundColor: severityConfig.bg }}>
-        <div className="w-12 h-12 rounded-lg flex items-center justify-center text-2xl" style={{ backgroundColor: severityConfig.color + '30' }}>
-          {typeConfig.icon}
-        </div>
-        <div>
-          <div className="flex items-center gap-2">
-            <span className="font-bold text-[hsl(var(--foreground))]">{typeConfig.label}</span>
-            <span className="px-2 py-0.5 text-xs font-medium rounded text-white" style={{ backgroundColor: severityConfig.color }}>
-              {alert.severity}
-            </span>
-          </div>
-          <p className="text-sm text-[hsl(var(--muted-foreground))]">{alert.location.name}</p>
-        </div>
-      </div>
-
-      {/* Thumbnail */}
-      <div className="aspect-video rounded-lg overflow-hidden border border-[hsl(var(--border))] bg-[hsl(var(--muted))]">
-        <img 
-          src={alert.thumbnailImg} 
-          alt={`Alert thumbnail for ${alert.alertType}`}
-          className="w-full h-full object-cover"
-        />
-      </div>
-
-      {/* Details Grid */}
-      <div className="grid grid-cols-2 gap-3">
-        <DetailItem label="Alert ID" value={alert.id} />
-        <DetailItem label="Camera" value={alert.cameraID} />
-        <DetailItem label="Timestamp" value={new Date(alert.timestamp).toLocaleString()} />
-        <DetailItem label="Confidence" value={`${Math.round(alert.confidence * 100)}%`} />
-        <DetailItem label="Coordinates" value={`${alert.location.lat.toFixed(4)}, ${alert.location.lng.toFixed(4)}`} />
-        <DetailItem label="Direction" value={alert.metadata?.direction || '—'} />
-        <DetailItem label="Speed" value={`${alert.metadata?.speedKmph || 0} km/h`} />
-        <DetailItem label="Track ID" value={alert.metadata?.trackId || '—'} />
-      </div>
-
-      {/* Action Buttons */}
-      <div className="flex gap-2 pt-2">
-        <button 
-          onClick={onClose}
-          className="flex-1 py-2.5 px-4 bg-[hsl(var(--secondary))] text-[hsl(var(--secondary-foreground))] font-medium rounded-lg border border-[hsl(var(--border))] hover:bg-[hsl(var(--muted))] transition-colors"
-        >
-          Close
-        </button>
-        <button 
-          onClick={() => navigator.clipboard.writeText(JSON.stringify(alert, null, 2))}
-          className="flex-1 py-2.5 px-4 bg-primary text-primary-foreground font-medium rounded-lg hover:opacity-90 transition-opacity"
-        >
-          Copy JSON
-        </button>
-      </div>
-    </div>
-  );
-}
-
-function DetailItem({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="p-3 bg-[hsl(var(--muted))] border border-[hsl(var(--border))] rounded-lg">
-      <p className="text-xs font-medium text-[hsl(var(--muted-foreground))] uppercase tracking-wider">{label}</p>
-      <p className="text-sm font-mono text-[hsl(var(--foreground))] truncate">{value}</p>
-    </div>
   );
 }

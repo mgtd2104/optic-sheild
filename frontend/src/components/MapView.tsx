@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
-import { MapContainer, TileLayer, Marker, Popup, CircleMarker, useMapEvents } from 'react-leaflet';
+import { useEffect, useState } from 'react';
+import { MapContainer, TileLayer, Marker, Popup, Circle, useMap, useMapEvents } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import { LiveAlert } from '../types/detection';
 import L from 'leaflet';
@@ -23,6 +23,8 @@ interface MapViewProps {
   onAlertClick: (alert: LiveAlert) => void;
   center?: [number, number];
   zoom?: number;
+  serverLocation?: { latitude: number; longitude: number; name: string; updated_at: string; source?: string } | null;
+  deviceLocation?: { latitude: number; longitude: number; accuracy: number; updatedAt: string } | null;
 }
 
 const DEFAULT_CENTER: [number, number] = [28.9845, 77.7064];
@@ -41,12 +43,26 @@ const ALERT_TYPE_ICONS: Record<string, string> = {
   TAMPER: '🔧',
 };
 
+const ServerIcon = L.divIcon({
+  className: 'server-location-marker',
+  html: '<span aria-hidden="true">S</span>',
+  iconSize: [30, 30],
+  iconAnchor: [15, 15],
+});
+
+const DeviceIcon = L.divIcon({
+  className: 'device-location-marker',
+  html: '<span aria-hidden="true"></span>',
+  iconSize: [22, 22],
+  iconAnchor: [11, 11],
+});
+
 function AlertMarker({ alert, isSelected, onClick }: { alert: LiveAlert; isSelected: boolean; onClick: () => void }) {
   const color = SEVERITY_COLORS[alert.severity] || '#6b7280';
   const icon = ALERT_TYPE_ICONS[alert.alertType] || '📍';
 
   return (
-    <Marker position={[alert.location.lat, alert.location.lng]} onClick={onClick}>
+    <Marker position={[alert.location.lat, alert.location.lng]} eventHandlers={{ click: onClick }}>
       <div
         className={`flex items-center justify-center w-8 h-8 rounded-full border-2 transition-all duration-200 ${
           isSelected ? 'ring-2 ring-offset-2 ring-offset-[hsl(var(--background))] scale-110' : ''
@@ -99,14 +115,104 @@ function MapFollower({ alert }: { alert: LiveAlert | null }) {
   return null;
 }
 
+function ServerLocationFollower({ location }: { location: MapViewProps['serverLocation'] }) {
+  const map = useMap();
+
+  useEffect(() => {
+    if (location) {
+      map.flyTo([location.latitude, location.longitude], Math.max(map.getZoom(), 7), { duration: 1.2 });
+    }
+  }, [location, map]);
+
+  return null;
+}
+
+function DeviceLocationFollower({ location }: { location: MapViewProps['deviceLocation'] }) {
+  const map = useMap();
+
+  useEffect(() => {
+    if (location) {
+      map.flyTo([location.latitude, location.longitude], Math.max(map.getZoom(), 15), { duration: 1.2 });
+    }
+  }, [location, map]);
+
+  return null;
+}
+
+function MapControls({ alerts, DEFAULT_CENTER, DEFAULT_ZOOM }: { 
+  alerts: LiveAlert[]; 
+  DEFAULT_CENTER: [number, number]; 
+  DEFAULT_ZOOM: number;
+}) {
+  const map = useMap();
+  
+  const fitAllAlerts = () => {
+    if (alerts.length > 0) {
+      const bounds = L.latLngBounds(alerts.map(a => [a.location.lat, a.location.lng]));
+      map.fitBounds(bounds, { padding: [50, 50], maxZoom: 12 });
+    }
+  };
+  
+  const resetView = () => {
+    map.setView(DEFAULT_CENTER, DEFAULT_ZOOM, { animate: true, duration: 1.5 });
+  };
+
+  return (
+    <div className="absolute top-3 right-3 z-10 flex flex-col gap-1">
+      <button
+        onClick={fitAllAlerts}
+        disabled={alerts.length === 0}
+        className="bg-[hsl(var(--card))] border border-[hsl(var(--border))] p-2 rounded-lg hover:bg-[hsl(var(--muted))] transition-colors shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
+        aria-label="Fit all alerts"
+        title="Fit All Alerts"
+      >
+        <svg className="w-5 h-5 text-[hsl(var(--foreground))]" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+        </svg>
+      </button>
+      <button
+        onClick={resetView}
+        className="bg-[hsl(var(--card))] border border-[hsl(var(--border))] p-2 rounded-lg hover:bg-[hsl(var(--muted))] transition-colors shadow-lg"
+        aria-label="Reset view to default"
+        title="Reset View"
+      >
+        <svg className="w-5 h-5 text-[hsl(var(--foreground))]" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 010.5 8H15a2.5 2.5 0 012.5-2.5V3.935M8 20.065V18.5a2.5 2.5 0 012.5-2.5H15a2.5 2.5 0 012.5 2.5V20.065" />
+        </svg>
+      </button>
+    </div>
+  );
+}
+
+function MapLayerToggle() {
+  const [useSatellite, setUseSatellite] = useState(false);
+  
+  return (
+    <button
+      onClick={() => setUseSatellite(!useSatellite)}
+      className="absolute top-3 left-3 z-10 bg-[hsl(var(--card))] border border-[hsl(var(--border))] p-2 rounded-lg hover:bg-[hsl(var(--muted))] transition-colors shadow-lg"
+      aria-label={useSatellite ? 'Switch to street map' : 'Switch to satellite view'}
+      title={useSatellite ? 'Street Map' : 'Satellite View'}
+    >
+      <svg className="w-5 h-5 text-[hsl(var(--foreground))]" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+      </svg>
+    </button>
+  );
+}
+
 export default function MapView({ 
   alerts, 
   selectedAlertId, 
   onAlertClick, 
   center = DEFAULT_CENTER, 
-  zoom = DEFAULT_ZOOM 
+  zoom = DEFAULT_ZOOM,
+  serverLocation = null,
+  deviceLocation = null,
 }: MapViewProps) {
   const [mapReady, setMapReady] = useState(false);
+  const [useSatellite, setUseSatellite] = useState(false);
   const selectedAlert = alerts.find(a => a.id === selectedAlertId) || null;
 
   return (
@@ -116,19 +222,22 @@ export default function MapView({
         zoom={zoom}
         zoomControl={false}
         scrollWheelZoom={true}
-        whenReady={setMapReady}
+        whenReady={() => setMapReady(true)}
         className="h-full w-full"
       >
+        {/* Base layer - always shown */}
         <TileLayer
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
           maxZoom={19}
         />
+        
+        {/* Satellite layer - toggled with opacity */}
         <TileLayer
           url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
           attribution="Tiles &copy; Esri"
           maxZoom={19}
-          opacity={0.3}
+          opacity={useSatellite ? 1 : 0}
         />
         
         {alerts.map(alert => (
@@ -139,48 +248,50 @@ export default function MapView({
             onClick={() => onAlertClick(alert)}
           />
         ))}
+
+        {serverLocation && (
+          <Marker
+            position={[serverLocation.latitude, serverLocation.longitude]}
+            icon={ServerIcon}
+          >
+            <Popup>
+              <div className="p-2 min-w-[180px]">
+                <div className="font-bold text-[hsl(var(--foreground))]">{serverLocation.name}</div>
+                <div className="mt-1 text-xs text-[hsl(var(--muted-foreground))]">
+                  {serverLocation.source === 'local-config-fallback' ? 'Configured server position' : 'Live server position'}<br />
+                  {serverLocation.latitude.toFixed(4)}, {serverLocation.longitude.toFixed(4)}<br />
+                  Updated {new Date(serverLocation.updated_at).toLocaleTimeString()}
+                </div>
+              </div>
+            </Popup>
+          </Marker>
+        )}
+
+        {deviceLocation && (
+          <>
+            <Marker position={[deviceLocation.latitude, deviceLocation.longitude]} icon={DeviceIcon}>
+              <Popup>
+                <div className="p-2 min-w-[180px]">
+                  <div className="font-bold text-[hsl(var(--foreground))]">Your live location</div>
+                  <div className="mt-1 text-xs text-[hsl(var(--muted-foreground))]">
+                    GPS accuracy: +/- {Math.round(deviceLocation.accuracy)} m<br />
+                    {deviceLocation.latitude.toFixed(6)}, {deviceLocation.longitude.toFixed(6)}<br />
+                    Updated {new Date(deviceLocation.updatedAt).toLocaleTimeString()}
+                  </div>
+                </div>
+              </Popup>
+            </Marker>
+            <Circle center={[deviceLocation.latitude, deviceLocation.longitude]} radius={deviceLocation.accuracy} pathOptions={{ color: '#38bdf8', fillColor: '#38bdf8', fillOpacity: 0.12 }} />
+          </>
+        )}
         
         <MapFollower alert={selectedAlert} />
+        <ServerLocationFollower location={serverLocation} />
+        <DeviceLocationFollower location={deviceLocation} />
+        <MapControls alerts={alerts} DEFAULT_CENTER={DEFAULT_CENTER} DEFAULT_ZOOM={DEFAULT_ZOOM} />
+        <MapLayerToggle />
       </MapContainer>
       
-      {/* Map Controls Overlay */}
-      <div className="absolute top-3 right-3 z-10 flex flex-col gap-1">
-        <button
-          onClick={() => {
-            const mapEl = document.querySelector('.leaflet-container');
-            if (mapEl) {
-              (mapEl as any)._leaflet_map.fitBounds(
-                alerts.map(a => [a.location.lat, a.location.lng]),
-                { padding: [50, 50], maxZoom: 12 }
-              );
-            }
-          }}
-          className="bg-[hsl(var(--card))] border border-[hsl(var(--border))] p-2 rounded-lg hover:bg-[hsl(var(--muted))] transition-colors shadow-lg"
-          aria-label="Fit all alerts"
-          title="Fit All Alerts"
-        >
-          <svg className="w-5 h-5 text-[hsl(var(--foreground))]" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-          </svg>
-        </button>
-        <button
-          onClick={() => {
-            const mapEl = document.querySelector('.leaflet-container');
-            if (mapEl) {
-              (mapEl as any)._leaflet_map.setView(DEFAULT_CENTER, DEFAULT_ZOOM, { duration: 1.5 });
-            }
-          }}
-          className="bg-[hsl(var(--card))] border border-[hsl(var(--border))] p-2 rounded-lg hover:bg-[hsl(var(--muted))] transition-colors shadow-lg"
-          aria-label="Reset view to default"
-          title="Reset View"
-        >
-          <svg className="w-5 h-5 text-[hsl(var(--foreground))]" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8H15a2.5 2.5 0 002.5-2.5V3.935M8 20.065V18.5a2.5 2.5 0 012.5-2.5H15a2.5 2.5 0 012.5 2.5V20.065" />
-          </svg>
-        </button>
-      </div>
-
       {/* Alert Count Badge */}
       <div className="absolute bottom-3 left-3 z-10 bg-[hsl(var(--card))] border border-[hsl(var(--border))] px-3 py-1.5 rounded-lg shadow-lg">
         <div className="flex items-center gap-2">

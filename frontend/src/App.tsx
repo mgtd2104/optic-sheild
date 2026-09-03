@@ -1,28 +1,66 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import React, { Suspense } from 'react';
 import { AuthProvider } from './context/AuthContext';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import Navbar from './components/Navbar';
 import LoginPage from './pages/LoginPage';
-import Dashboard from './pages/Dashboard';
-import AlertsPage from './pages/Alerts';
-import TrackPage from './pages/Track';
-import HistoryPage from './pages/History';
-import Settings from './pages/Settings';
 import ProtectedRoute from './components/ProtectedRoute';
 import './styles/globals.css';
+
+// Lazy load page components for code splitting
+const Dashboard = React.lazy(() => import('./pages/Dashboard'));
+const AlertsPage = React.lazy(() => import('./pages/Alerts'));
+const TrackPage = React.lazy(() => import('./pages/Track'));
+const HistoryPage = React.lazy(() => import('./pages/History'));
+const Settings = React.lazy(() => import('./pages/Settings'));
 
 function AppRoutes() {
   return (
     <Routes>
-      <Route path="/login" element={<LoginPage />} />
+      <Route path="/login" element={<Navigate to="/dashboard" replace />} />
       <Route element={<ProtectedRoute />}>
         <Route element={<Navbar />}>
           <Route path="/" element={<Navigate to="/dashboard" replace />} />
-          <Route path="/dashboard" element={<Dashboard />} />
-          <Route path="/alerts" element={<AlertsPage />} />
-          <Route path="/track" element={<TrackPage />} />
-          <Route path="/history" element={<HistoryPage />} />
-          <Route path="/settings" element={<Settings />} />
+          <Route
+            path="/dashboard"
+            element={
+              <Suspense fallback={<div className="flex h-[calc(100vh-64px)] items-center justify-center">Loading...</div>}>
+                <Dashboard />
+              </Suspense>
+            }
+          />
+          <Route
+            path="/alerts"
+            element={
+              <Suspense fallback={<div className="flex h-[calc(100vh-64px)] items-center justify-center">Loading...</div>}>
+                <AlertsPage />
+              </Suspense>
+            }
+          />
+          <Route
+            path="/track"
+            element={
+              <Suspense fallback={<div className="flex h-[calc(100vh-64px)] items-center justify-center">Loading...</div>}>
+                <TrackPage />
+              </Suspense>
+            }
+          />
+          <Route
+            path="/history"
+            element={
+              <Suspense fallback={<div className="flex h-[calc(100vh-64px)] items-center justify-center">Loading...</div>}>
+                <HistoryPage />
+              </Suspense>
+            }
+          />
+          <Route
+            path="/settings"
+            element={
+              <Suspense fallback={<div className="flex h-[calc(100vh-64px)] items-center justify-center">Loading...</div>}>
+                <Settings />
+              </Suspense>
+            }
+          />
         </Route>
       </Route>
       <Route path="*" element={<Navigate to="/dashboard" replace />} />

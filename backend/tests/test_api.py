@@ -44,11 +44,15 @@ class TestHealthEndpoints:
 class TestAuthentication:
     """Tests for authentication endpoints."""
     
-    def test_create_token(self, test_client: TestClient):
-        """Test JWT token creation."""
+    def test_register_and_login(self, test_client: TestClient):
+        """Test user registration followed by login returns a JWT."""
+        test_client.post(
+            "/api/auth/register",
+            json={"username": "loginflowuser", "email": "loginflowuser@ibvap.test", "password": "testpass123"}
+        )
         response = test_client.post(
-            "/auth/token",
-            json={"username": "testuser", "password": "testpass"}
+            "/api/auth/login",
+            json={"username": "loginflowuser", "password": "testpass123"}
         )
         assert response.status_code == 200
         data = response.json()
@@ -62,7 +66,7 @@ class TestAuthentication:
         token = create_jwt_token("testuser")
         
         response = test_client.post(
-            "/auth/verify",
+            "/api/auth/verify",
             headers={"Authorization": f"Bearer {token}"}
         )
         assert response.status_code == 200
@@ -73,7 +77,7 @@ class TestAuthentication:
     def test_verify_token_with_valid_api_key(self, test_client: TestClient, valid_api_key: str):
         """Test token verification with valid API key."""
         response = test_client.post(
-            "/auth/verify",
+            "/api/auth/verify",
             headers={"X-API-Key": valid_api_key}
         )
         assert response.status_code == 200
@@ -84,7 +88,7 @@ class TestAuthentication:
     def test_verify_token_invalid_jwt(self, test_client: TestClient):
         """Test token verification with invalid JWT."""
         response = test_client.post(
-            "/auth/verify",
+            "/api/auth/verify",
             headers={"Authorization": "Bearer invalid-token"}
         )
         assert response.status_code == 401
@@ -92,14 +96,14 @@ class TestAuthentication:
     def test_verify_token_invalid_api_key(self, test_client: TestClient, invalid_api_key: str):
         """Test token verification with invalid API key."""
         response = test_client.post(
-            "/auth/verify",
+            "/api/auth/verify",
             headers={"X-API-Key": invalid_api_key}
         )
         assert response.status_code == 401
     
     def test_verify_token_no_auth(self, test_client: TestClient):
         """Test token verification without authentication."""
-        response = test_client.post("/auth/verify")
+        response = test_client.post("/api/auth/verify")
         assert response.status_code == 401
 
 
@@ -212,6 +216,30 @@ class TestAnalysisEndpoints:
             headers={"X-API-Key": valid_api_key}
         )
         assert response.status_code == 400
+
+    def test_footage_upload_video_with_api_key(
+        self,
+        test_client: TestClient,
+        valid_api_key: str,
+        tmp_path,
+        monkeypatch
+    ):
+        """Test video upload stores footage and returns a playback URL."""
+        from main import settings
+
+        monkeypatch.setattr(settings, "UPLOAD_DIR", tmp_path)
+        response = test_client.post(
+            "/footage/upload",
+            files={"file": ("patrol.mp4", b"video-data", "video/mp4")},
+            headers={"X-API-Key": valid_api_key}
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["filename"] == "patrol.mp4"
+        assert data["url"].startswith("/uploads/")
+        assert data["size"] == len(b"video-data")
+        assert (tmp_path / data["url"].split("/")[-1]).read_bytes() == b"video-data"
 
 
 class TestWebSocketEndpoint:

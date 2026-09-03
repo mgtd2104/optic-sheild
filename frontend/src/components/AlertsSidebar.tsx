@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { LiveAlert, AlertType, Severity } from '../types/detection';
 
 interface AlertsSidebarProps {
@@ -27,6 +27,14 @@ const ALERT_TYPE_CONFIG: Record<AlertType, { icon: string; label: string }> = {
 const TYPE_FILTERS = ['all', 'INTRUSION', 'ANPR', 'FRS_WATCHLIST', 'TAMPER'] as const;
 const SEVERITY_FILTERS = ['all', 'CRITICAL', 'HIGH', 'MEDIUM'] as const;
 
+// Sanitize function to prevent XSS
+const sanitize = (str: string) => str
+  .replace(/&/g, '&')
+  .replace(/</g, '<')
+  .replace(/>/g, '>')
+  .replace(/"/g, '"')
+  .replace(/'/g, '&#039;');
+
 export default function AlertsSidebar({ 
   alerts, 
   selectedAlertId, 
@@ -36,11 +44,20 @@ export default function AlertsSidebar({
   className = '',
   isDemoMode = false
 }: AlertsSidebarProps) {
-  const [typeFilter, setTypeFilter] = useState<TYPE_FILTERS[number]>('all');
-  const [severityFilter, setSeverityFilter] = useState<SEVERITY_FILTERS[number]>('all');
+  const [typeFilter, setTypeFilter] = useState<(typeof TYPE_FILTERS)[number]>('all');
+  const [severityFilter, setSeverityFilter] = useState<(typeof SEVERITY_FILTERS)[number]>('all');
   const [searchQuery, setSearchQuery] = useState('');
 
-  const filteredAlerts = alerts.filter(alert => {
+  // Reset filters when alerts array changes significantly (new alerts arrive)
+  useEffect(() => {
+    if (alerts.length > 0) {
+      setTypeFilter('all');
+      setSeverityFilter('all');
+      setSearchQuery('');
+    }
+  }, [alerts.length]);
+
+  const filteredAlerts = useMemo(() => alerts.filter(alert => {
     if (typeFilter !== 'all' && alert.alertType !== typeFilter) return false;
     if (severityFilter !== 'all' && alert.severity !== severityFilter) return false;
     if (searchQuery) {
@@ -53,7 +70,7 @@ export default function AlertsSidebar({
       );
     }
     return true;
-  });
+  }), [alerts, typeFilter, severityFilter, searchQuery]);
 
   const sortedAlerts = [...filteredAlerts].sort((a, b) => 
     new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
@@ -242,7 +259,7 @@ export default function AlertsSidebar({
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
                         </svg>
-                        {alert.location.name}
+                        {sanitize(alert.location.name)}
                       </span>
                       <span className="flex items-center gap-1">
                         <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
@@ -279,7 +296,7 @@ export default function AlertsSidebar({
                 </div>
               </article>
             );
-          })}
+          })
         )}
       </div>
     </div>

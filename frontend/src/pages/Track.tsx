@@ -3,27 +3,35 @@ import { LiveAlert } from '../types/detection';
 import { useLiveAlerts } from '../hooks/useLiveAlerts';
 import VideoPane from '../components/VideoPane';
 import MapView from '../components/MapView';
-
-const SAMPLE_ALERT: LiveAlert = {
-  id: 'ALT-20260831-143022-ABC1',
-  timestamp: new Date().toISOString(),
-  cameraID: 'CAM-BDR-001',
-  location: { lat: 28.9845, lng: 77.7064, name: 'BOP-01 Alpha - Akhnoor Sector' },
-  alertType: 'INTRUSION',
-  severity: 'HIGH',
-  thumbnailImg: 'https://picsum.photos/seed/intrusion1/320/240',
-  explainabilityHeatmapUrl: 'https://picsum.photos/seed/heatmap1/320/240',
-  confidence: 0.94,
-  metadata: { trackId: 'TRK-X7K9', speedKmph: 12, direction: 'NE', classification: 'Human/Pedestrian' },
-};
+import AlertDetailCard from '../components/AlertDetailCard';
+import FootageUpload, { UploadedFootage } from '../components/FootageUpload';
+import { API_BASE } from '../api/client';
+import { useServerLocation } from '../hooks/useServerLocation';
+import { useDeviceLocation } from '../hooks/useDeviceLocation';
 
 export default function TrackPage() {
-  const [selectedAlert, setSelectedAlert] = useState<LiveAlert | null>(SAMPLE_ALERT);
-  const { alerts, connected, isDemoMode } = useLiveAlerts({ maxAlerts: 15, demoMode: true, demoIntervalMs: 8000 });
+  const [selectedAlert, setSelectedAlert] = useState<LiveAlert | null>(null);
+  const [showUpload, setShowUpload] = useState(false);
+  const [uploadedVideoUrl, setUploadedVideoUrl] = useState<string | null>(null);
+  const [uploadedFootageId, setUploadedFootageId] = useState<string | null>(null);
+  const liveWsUrl = `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}/ws/stream?monitor=primary&token=${encodeURIComponent(localStorage.getItem('ibvap_token') || '')}`;
+  const { alerts, connected, isDemoMode, streamFrame } = useLiveAlerts({ maxAlerts: 15, demoMode: false, wsUrl: liveWsUrl });
+  const { location: serverLocation } = useServerLocation();
+  const { location: deviceLocation } = useDeviceLocation();
 
   const handleAlertClick = useCallback((alert: LiveAlert) => {
     setSelectedAlert(alert);
   }, []);
+
+  const handleUploadComplete = useCallback((footage: UploadedFootage) => {
+    setUploadedVideoUrl(`${API_BASE}${footage.url}`);
+    setUploadedFootageId(footage.id);
+    setShowUpload(false);
+  }, []);
+
+  const analysisWsUrl = uploadedFootageId
+    ? `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}/ws/footage/${uploadedFootageId}?monitor=primary&token=${encodeURIComponent(localStorage.getItem('ibvap_token') || '')}`
+    : undefined;
 
   return (
     <main className="h-[calc(100vh-64px)] flex flex-col bg-[hsl(var(--background))]" role="main">
@@ -37,11 +45,29 @@ export default function TrackPage() {
             </span>
           </div>
         </div>
+        <button
+          type="button"
+          onClick={() => setShowUpload(value => !value)}
+          className="inline-flex items-center gap-2 rounded-lg bg-[hsl(var(--primary))] px-3 py-2 text-sm font-medium text-white transition-colors hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-[hsl(var(--primary))] focus:ring-offset-2"
+          aria-expanded={showUpload}
+          aria-controls="track-upload-panel"
+        >
+          <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+            <path d="M12 3v12m0 0 4-4m-4 4-4-4M5 21h14a2 2 0 0 0 2-2v-4M3 15v4a2 2 0 0 0 2 2" />
+          </svg>
+          {showUpload ? 'Close uploader' : 'Upload video'}
+        </button>
       </header>
+
+      {showUpload && (
+        <section id="track-upload-panel" className="max-h-[min(360px,45vh)] overflow-y-auto border-b border-[hsl(var(--border))] bg-[hsl(var(--background))] p-4" aria-label="Upload video footage">
+          <FootageUpload cameraId="CAM-BDR-001" onUploadComplete={handleUploadComplete} maxSizeMB={100} />
+        </section>
+      )}
 
       <div className="flex-1 flex overflow-hidden">
         <section className="w-full lg:w-2/3 flex flex-col min-w-0" aria-label="Video feed">
-          <VideoPane cameraId="CAM-BDR-001" className="h-full" />
+          <VideoPane cameraId={uploadedVideoUrl ? 'AI ANALYZED FOOTAGE' : 'CAM-BDR-001'} streamUrl={uploadedVideoUrl || undefined} analysisWsUrl={analysisWsUrl} analysisFrame={uploadedFootageId ? null : streamFrame} className="h-full" />
         </section>
 
         <aside className="w-full lg:w-1/3 flex flex-col border-l border-[hsl(var(--border))] bg-[hsl(var(--muted))] min-w-0" aria-label="Track details">
@@ -52,12 +78,14 @@ export default function TrackPage() {
               onAlertClick={handleAlertClick}
               center={[28.9845, 77.7064]}
               zoom={7}
+              serverLocation={serverLocation}
+              deviceLocation={deviceLocation}
             />
           </div>
 
           <div className="flex-1 min-h-0 p-3 lg:p-4 overflow-y-auto">
             {selectedAlert ? (
-              <TrackDetailCard alert={selectedAlert} onClose={() => setSelectedAlert(null)} />
+              <AlertDetailCard alert={selectedAlert} onClose={() => setSelectedAlert(null)} showExplainability showTrackInfo />
             ) : (
               <div className="flex flex-col items-center justify-center h-full text-[hsl(var(--muted-foreground))]">
                 <svg className="w-16 h-16 mb-4 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
@@ -71,79 +99,5 @@ export default function TrackPage() {
         </aside>
       </div>
     </main>
-  );
-}
-
-function TrackDetailCard({ alert, onClose }: { alert: LiveAlert; onClose: () => void }) {
-  const severityConfig = {
-    CRITICAL: { color: '#ef4444', bg: '#ef444420' },
-    HIGH: { color: '#f97316', bg: '#f9731620' },
-    MEDIUM: { color: '#eab308', bg: '#eab30820' },
-  }[alert.severity];
-
-  const typeConfig = {
-    INTRUSION: { icon: '🚨', label: 'INTRUSION' },
-    ANPR: { icon: '🚗', label: 'ANPR' },
-    FRS_WATCHLIST: { icon: '👤', label: 'FRS WATCHLIST' },
-    TAMPER: { icon: '🔧', label: 'TAMPER' },
-  }[alert.alertType];
-
-  return (
-    <div className="space-y-4 h-full overflow-y-auto">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3 p-3 rounded-lg border" style={{ borderColor: severityConfig.color, backgroundColor: severityConfig.bg }}>
-          <div className="w-12 h-12 rounded-lg flex items-center justify-center text-2xl" style={{ backgroundColor: severityConfig.color + '30' }}>
-            {typeConfig.icon}
-          </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="font-bold text-[hsl(var(--foreground))]">{typeConfig.label}</span>
-              <span className="px-2 py-0.5 text-xs font-medium rounded text-white" style={{ backgroundColor: severityConfig.color }}>
-                {alert.severity}
-              </span>
-            </div>
-            <p className="text-sm text-[hsl(var(--muted-foreground))]">{alert.location.name}</p>
-          </div>
-        </div>
-        <button onClick={onClose} className="p-2 rounded-lg hover:bg-[hsl(var(--muted))] transition-colors" aria-label="Close">
-          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-          </svg>
-        </button>
-      </div>
-
-      <div className="aspect-video rounded-lg overflow-hidden border border-[hsl(var(--border))] bg-[hsl(var(--muted))]">
-        <img src={alert.thumbnailImg} alt={`Track thumbnail`} className="w-full h-full object-cover" />
-      </div>
-
-      <div className="grid grid-cols-2 gap-3">
-        <DetailItem label="Track ID" value={alert.metadata?.trackId || '—'} />
-        <DetailItem label="Type" value={typeConfig.label} />
-        <DetailItem label="Camera" value={alert.cameraID} />
-        <DetailItem label="Severity" value={alert.severity} />
-        <DetailItem label="Time" value={new Date(alert.timestamp).toLocaleString()} />
-        <DetailItem label="Confidence" value={`${Math.round(alert.confidence * 100)}%`} />
-        <DetailItem label="Speed" value={`${alert.metadata?.speedKmph || 0} km/h`} />
-        <DetailItem label="Direction" value={alert.metadata?.direction || '—'} />
-        <DetailItem label="Coordinates" value={`${alert.location.lat.toFixed(4)}, ${alert.location.lng.toFixed(4)}`} />
-        <DetailItem label="Classification" value={alert.metadata?.classification || '—'} />
-      </div>
-
-      <div className="pt-2 border-t border-[hsl(var(--border))]">
-        <p className="text-xs font-medium text-[hsl(var(--muted-foreground))] mb-2">EXPLAINABILITY HEATMAP</p>
-        <div className="aspect-video rounded-lg overflow-hidden border border-[hsl(var(--border))] bg-[hsl(var(--muted))]">
-          <img src={alert.explainabilityHeatmapUrl || alert.thumbnailImg} alt="Explainability heatmap" className="w-full h-full object-cover opacity-80" />
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function DetailItem({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="p-3 bg-[hsl(var(--muted))] border border-[hsl(var(--border))] rounded-lg">
-      <p className="text-xs font-medium text-[hsl(var(--muted-foreground))] uppercase tracking-wider">{label}</p>
-      <p className="text-sm font-mono text-[hsl(var(--foreground))] truncate">{value}</p>
-    </div>
   );
 }

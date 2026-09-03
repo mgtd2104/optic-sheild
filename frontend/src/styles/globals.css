@@ -97,6 +97,40 @@
   @apply bg-[hsl(var(--secondary))] text-[hsl(var(--secondary-foreground))] border-0 hover:bg-[hsl(var(--muted))];
 }
 
+.server-location-marker {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid #22c55e;
+  border-radius: 9999px;
+  background: #14532d;
+  box-shadow: 0 0 0 5px rgb(34 197 94 / 20%), 0 2px 8px rgb(0 0 0 / 45%);
+}
+
+.server-location-marker span {
+  color: #bbf7d0;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.device-location-marker {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 3px solid white;
+  border-radius: 9999px;
+  background: #0284c7;
+  box-shadow: 0 0 0 4px rgb(14 165 233 / 35%), 0 2px 8px rgb(0 0 0 / 45%);
+}
+
+.device-location-marker span {
+  width: 6px;
+  height: 6px;
+  border-radius: 9999px;
+  background: white;
+}
+
 /* Custom scrollbar for webkit */
 ::-webkit-scrollbar {
   width: 8px;

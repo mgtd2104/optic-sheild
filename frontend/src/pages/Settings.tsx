@@ -1,5 +1,26 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useLayoutEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
+
+// Initialize theme immediately to prevent flash - this runs synchronously during render
+if (typeof window !== 'undefined') {
+  const stored = localStorage.getItem('ibvap_settings');
+  if (stored) {
+    try {
+      const parsed = JSON.parse(stored);
+      if (parsed.theme === 'dark') {
+        document.documentElement.classList.add('dark');
+      } else {
+        document.documentElement.classList.remove('dark');
+      }
+    } catch {
+      // Ignore parse errors, default to dark
+      document.documentElement.classList.add('dark');
+    }
+  } else {
+    // Default to dark theme
+    document.documentElement.classList.add('dark');
+  }
+}
 
 export default function Settings() {
   const { user, logout } = useAuth();
@@ -25,10 +46,30 @@ export default function Settings() {
     }
   }, []);
 
+  // Apply theme changes using useLayoutEffect to prevent visual flicker
+  useLayoutEffect(() => {
+    document.documentElement.classList.toggle('dark', settings.theme === 'dark');
+  }, [settings.theme]);
+
+  // Persist settings and sync across tabs
   useEffect(() => {
     localStorage.setItem('ibvap_settings', JSON.stringify(settings));
-    document.documentElement.classList.toggle('dark', settings.theme === 'dark');
   }, [settings]);
+
+  // Listen for storage changes from other tabs
+  useEffect(() => {
+    const handleStorageChange = (e: StorageEvent) => {
+      if (e.key === 'ibvap_settings' && e.newValue) {
+        try {
+          setSettings(JSON.parse(e.newValue));
+        } catch {
+          // Ignore parse errors
+        }
+      }
+    };
+    window.addEventListener('storage', handleStorageChange);
+    return () => window.removeEventListener('storage', handleStorageChange);
+  }, []);
 
   const handleChange = (key: string, value: any) => {
     setSettings(s => ({ ...s, [key]: value }));

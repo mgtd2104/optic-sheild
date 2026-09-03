@@ -1,4 +1,5 @@
-import { Link, useLocation } from 'react-router-dom';
+import { Link, useLocation, Outlet, useNavigate } from 'react-router-dom';
+import { useState, useRef, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 
 const navLinks = [
@@ -11,12 +12,32 @@ const navLinks = [
 
 export default function Navbar() {
   const location = useLocation();
+  const navigate = useNavigate();
   const { user, isAuthenticated, logout } = useAuth();
+  const [showUserMenu, setShowUserMenu] = useState(false);
+  const userMenuRef = useRef<HTMLDivElement>(null);
 
   if (!isAuthenticated) return null;
 
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (userMenuRef.current && !userMenuRef.current.contains(event.target as Node)) {
+        setShowUserMenu(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const handleLogout = () => {
+    logout();
+    navigate('/login');
+  };
+
   return (
-    <nav className="h-16 bg-[hsl(var(--muted))] border-b border-[hsl(var(--border))] flex items-center justify-between px-4 lg:px-6" role="navigation" aria-label="Main navigation">
+    <>
+      <nav className="h-16 bg-[hsl(var(--muted))] border-b border-[hsl(var(--border))] flex items-center justify-between px-4 lg:px-6" role="navigation" aria-label="Main navigation">
       <Link to="/" className="flex items-center gap-2 text-[hsl(var(--foreground))] hover:opacity-80 transition-opacity" aria-label="IBVAP Home">
         <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center">
           <svg className="w-5 h-5 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
@@ -54,12 +75,14 @@ export default function Navbar() {
           <span className="text-xs font-mono text-[hsl(var(--muted-foreground))]">SECURE</span>
         </div>
 
-        {/* User Profile */}
-        <div className="flex items-center gap-3">
+        {/* User Profile Dropdown */}
+        <div className="relative" ref={userMenuRef}>
           <button 
-            onClick={logout}
+            onClick={() => setShowUserMenu(!showUserMenu)}
             className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-[hsl(var(--background))] border border-[hsl(var(--border))] hover:bg-[hsl(var(--muted))] transition-colors"
             aria-label="User menu"
+            aria-expanded={showUserMenu}
+            aria-haspopup="true"
           >
             <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center">
               <svg className="w-4 h-4 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
@@ -70,12 +93,34 @@ export default function Navbar() {
               <p className="text-sm font-medium text-[hsl(var(--foreground))]">{user?.name}</p>
               <p className="text-xs text-[hsl(var(--muted-foreground))]">{user?.role}</p>
             </div>
-            <svg className="w-4 h-4 text-[hsl(var(--muted-foreground))]" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+            <svg className={`w-4 h-4 text-[hsl(var(--muted-foreground))] transition-transform ${showUserMenu ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
             </svg>
           </button>
+
+          {showUserMenu && (
+            <div className="absolute right-0 mt-2 w-48 bg-[hsl(var(--card))] border border-[hsl(var(--border))] rounded-lg shadow-lg py-1 z-50 animate-in" role="menu">
+              <div className="px-4 py-2 border-b border-[hsl(var(--border))]">
+                <p className="text-sm font-medium text-[hsl(var(--foreground))]">{user?.name}</p>
+                <p className="text-xs text-[hsl(var(--muted-foreground))]">{user?.email}</p>
+                <p className="text-xs text-[hsl(var(--muted-foreground))]">{user?.role} • {user?.bopLocation}</p>
+              </div>
+              <button
+                onClick={handleLogout}
+                className="w-full flex items-center gap-2 px-4 py-2 text-sm text-[hsl(var(--foreground))] hover:bg-[hsl(var(--muted))] transition-colors"
+                role="menuitem"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+                </svg>
+                Sign Out
+              </button>
+            </div>
+          )}
         </div>
       </div>
-    </nav>
+      </nav>
+      <Outlet />
+    </>
   );
 }

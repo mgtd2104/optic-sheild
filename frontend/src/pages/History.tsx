@@ -1,6 +1,7 @@
 import { useState, useCallback, useMemo } from 'react';
 import { LiveAlert } from '../types/detection';
 import { useLiveAlerts } from '../hooks/useLiveAlerts';
+import AlertDetailCard from '../components/AlertDetailCard';
 
 const SEVERITY_CONFIG = {
   CRITICAL: { color: '#ef4444', bg: '#ef444420' },
@@ -57,7 +58,8 @@ export default function HistoryPage() {
     setSelectedAlertId(null);
   }, []);
 
-  const selectedAlert = alerts.find(a => a.id === selectedAlertId) || null;
+  // FIX: Use filteredAlerts instead of alerts to find selected alert
+  const selectedAlert = filteredAlerts.find(a => a.id === selectedAlertId) || null;
 
   const TYPE_FILTERS = ['all', 'INTRUSION', 'ANPR', 'FRS_WATCHLIST', 'TAMPER'] as const;
   const SEVERITY_FILTERS = ['all', 'CRITICAL', 'HIGH', 'MEDIUM'] as const;
@@ -151,7 +153,7 @@ export default function HistoryPage() {
                     </td>
                   </tr>
                 ) : (
-                  filteredAlerts.map(alert => {
+                  filteredAlerts.map((alert) => {
                     const severityConfig = SEVERITY_CONFIG[alert.severity];
                     const typeConfig = TYPE_CONFIG[alert.alertType];
                     const isSelected = alert.id === selectedAlertId;
@@ -189,16 +191,16 @@ export default function HistoryPage() {
                           {alert.location.name}
                         </td>
                         <td className="px-3 py-2">
-                          <button onClick={e=>{e.stopPropagation();setSelectedAlertId(alert.id);}} className="px-2 py-1 text-xs font-medium rounded border border-[hsl(var(--border))] bg-[hsl(var(--background))] text-[hsl(var(--foreground))] hover:bg-[hsl(var(--muted))] transition-colors">
+                          <button onClick={(e)=>{e.stopPropagation();setSelectedAlertId(alert.id);}} className="px-2 py-1 text-xs font-medium rounded border border-[hsl(var(--border))] bg-[hsl(var(--background))] text-[hsl(var(--foreground))] hover:bg-[hsl(var(--muted))] transition-colors">
                             Details
                           </button>
                         </td>
                       </tr>
                     );
-                  })}
-                </tbody>
+                  })
+                )}
+              </tbody>
               </table>
-            </div>
           </div>
         </div>
 
@@ -215,68 +217,12 @@ export default function HistoryPage() {
                 </button>
               </div>
               <div className="flex-1 overflow-y-auto p-4 space-y-4">
-                <HistoryDetailCard alert={alerts.find(a=>a.id===selectedAlertId)!} onClose={()=>setSelectedAlertId(null)} />
+                <AlertDetailCard alert={selectedAlert} onClose={handleCloseDetail} showTrackInfo />
               </div>
             </div>
           </div>
         )}
       </div>
     </main>
-  );
-}
-
-function HistoryDetailCard({ alert, onClose }: { alert: LiveAlert; onClose: () => void }) {
-  const severityConfig = SEVERITY_CONFIG[alert.severity];
-  const typeConfig = TYPE_CONFIG[alert.alertType];
-
-  return (
-    <div className="space-y-4">
-      <div className="flex items-center gap-3 p-3 rounded-lg border" style={{ borderColor: severityConfig.color, backgroundColor: severityConfig.bg }}>
-        <div className="w-12 h-12 rounded-lg flex items-center justify-center text-2xl" style={{ backgroundColor: severityConfig.color + '30' }}>
-          {typeConfig.icon}
-        </div>
-        <div>
-          <div className="flex items-center gap-2">
-            <span className="font-bold text-[hsl(var(--foreground))]">{typeConfig.label}</span>
-            <span className="px-2 py-0.5 text-xs font-medium rounded text-white" style={{ backgroundColor: severityConfig.color }}>
-              {alert.severity}
-            </span>
-          </div>
-          <p className="text-sm text-[hsl(var(--muted-foreground))]">{alert.location.name}</p>
-        </div>
-      </div>
-
-      <div className="aspect-video rounded-lg overflow-hidden border border-[hsl(var(--border))] bg-[hsl(var(--muted))]">
-        <img src={alert.thumbnailImg} alt={`Detection thumbnail`} className="w-full h-full object-cover" />
-      </div>
-
-      <div className="grid grid-cols-2 gap-3">
-        <DetailItem label="Detection ID" value={alert.id} />
-        <DetailItem label="Type" value={typeConfig.label} />
-        <DetailItem label="Camera" value={alert.cameraID} />
-        <DetailItem label="Severity" value={alert.severity} />
-        <DetailItem label="Timestamp" value={new Date(alert.timestamp).toLocaleString()} />
-        <DetailItem label="Confidence" value={`${Math.round(alert.confidence*100)}%`} />
-        <DetailItem label="Coordinates" value={`${alert.location.lat.toFixed(4)}, ${alert.location.lng.toFixed(4)}`} />
-        <DetailItem label="Track ID" value={alert.metadata?.trackId || '—'} />
-        <DetailItem label="Speed" value={`${alert.metadata?.speedKmph||0} km/h`} />
-        <DetailItem label="Direction" value={alert.metadata?.direction || '—'} />
-        <DetailItem label="Classification" value={alert.metadata?.classification || '—'} />
-      </div>
-
-      <div className="flex gap-2 pt-2">
-        <button onClick={onClose} className="flex-1 py-2.5 px-4 bg-[hsl(var(--secondary))] text-[hsl(var(--secondary-foreground))] font-medium rounded-lg border border-[hsl(var(--border))] hover:bg-[hsl(var(--muted))] transition-colors">Close</button>
-        <button onClick={()=>navigator.clipboard.writeText(JSON.stringify(alert,null,2))} className="flex-1 py-2.5 px-4 bg-primary text-primary-foreground font-medium rounded-lg hover:opacity-90 transition-opacity">Copy JSON</button>
-      </div>
-    </div>
-  );
-}
-
-function DetailItem({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="p-3 bg-[hsl(var(--muted))] border border-[hsl(var(--border))] rounded-lg">
-      <p className="text-xs font-medium text-[hsl(var(--muted-foreground))] uppercase tracking-wider">{label}</p>
-      <p className="text-sm font-mono text-[hsl(var(--foreground))] truncate">{value}</p>
-    </div>
   );
 }

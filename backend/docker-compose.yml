@@ -10,8 +10,9 @@ version: '3.8'
 
 services:
   # ---------------------------------------------------------
-  # PostgreSQL Database
+  # PostgreSQL Database (Optional - for production use)
   # ---------------------------------------------------------
+  # Comment out this service and use SQLite (default) if not needed
   postgres:
     image: postgres:16-alpine
     container_name: ibvap-postgres
@@ -19,7 +20,7 @@ services:
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-ibvap}
       POSTGRES_USER: ${POSTGRES_USER:-ibvap}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}  # REQUIRED - no default!
       POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256"
     volumes:
       - postgres_data:/var/lib/postgresql/data
@@ -41,10 +42,13 @@ services:
         reservations:
           cpus: '0.5'
           memory: 512M
+    profiles:
+      - database  # Enable with: docker compose --profile database up
 
   # ---------------------------------------------------------
-  # Redis Cache & Pub/Sub
+  # Redis Cache & Pub/Sub (Optional - for production use)
   # ---------------------------------------------------------
+  # Comment out this service if not needed
   redis:
     image: redis:7-alpine
     container_name: ibvap-redis
@@ -69,6 +73,8 @@ services:
         reservations:
           cpus: '0.25'
           memory: 256M
+    profiles:
+      - cache  # Enable with: docker compose --profile cache up
 
   # ---------------------------------------------------------
   # IBVAP FastAPI Backend
@@ -88,16 +94,31 @@ services:
       - PYTHONDONTWRITEBYTECODE=1
       - CUDA_VISIBLE_DEVICES=0
       - PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:512
-      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-ibvap}:${POSTGRES_PASSWORD:-changeme}@postgres:5432/${POSTGRES_DB:-ibvap}
-      - REDIS_URL=redis://redis:6379/0
-      - API_KEY=${API_KEY:-dev-secret-key-change-in-production}
-      - JWT_SECRET=${JWT_SECRET:-dev-jwt-secret-change-in-production}
+      # Database - uses SQLite by default, PostgreSQL when profile enabled
+      - DATABASE_URL=${DATABASE_URL:-sqlite:///./ibvap.db}
+      # Redis - only used when cache profile enabled
+      - REDIS_URL=${REDIS_URL:-}
+      # REQUIRED in production - no defaults!
+      - API_KEY=${API_KEY}
+      - JWT_SECRET=${JWT_SECRET}
       - JWT_ALGORITHM=HS256
       - JWT_EXPIRY_MINUTES=60
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - ENVIRONMENT=${ENVIRONMENT:-development}
       - MODEL_PATH=/app/models
       - UPLOAD_DIR=/app/uploads
+      # Configurable detection classes
+      - PERSON_CLASS_ID=0
+      - VEHICLE_CLASS_IDS=2,3,5,7
+      - ALLOWED_CLASS_IDS=0,2,3,5,7
+      # WebSocket settings
+      - WS_VIDEO_SOURCE=${WS_VIDEO_SOURCE:-test_video.mp4}
+      - WS_FRAME_INTERVAL=0.033
+      - WS_MAX_QUEUE_SIZE=10
+      # Rate limiting
+      - AUTH_RATE_LIMIT=10
+      # CORS
+      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-*}
     volumes:
       - ./models:/app/models:ro
       - ./logs:/app/logs
@@ -132,8 +153,9 @@ services:
             capabilities: [gpu]
 
   # ---------------------------------------------------------
-  # Nginx Reverse Proxy with TLS Termination
+  # Nginx Reverse Proxy with TLS Termination (Optional)
   # ---------------------------------------------------------
+  # Only enable when SSL certificates are available
   nginx:
     image: nginx:alpine
     container_name: ibvap-nginx
@@ -162,6 +184,8 @@ services:
         reservations:
           cpus: '0.25'
           memory: 128M
+    profiles:
+      - proxy  # Enable with: docker compose --profile proxy up
 
   # ---------------------------------------------------------
   # Prometheus Monitoring (Optional)
@@ -200,7 +224,7 @@ services:
     restart: unless-stopped
     environment:
       - GF_SECURITY_ADMIN_USER=${GRAFANA_USER:-admin}
-      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD}  # REQUIRED - no default!
       - GF_USERS_ALLOW_SIGN_UP=false
     volumes:
       - grafana_data:/var/lib/grafana

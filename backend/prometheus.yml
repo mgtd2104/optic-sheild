@@ -1,5 +1,5 @@
 # =============================================================================
-# IBVAP Backend - Prometheus Configuration
+# IBVAP Backend - Prometheus Configuration with Alerting Rules
 # =============================================================================
 
 global:
@@ -14,7 +14,8 @@ alerting:
     - static_configs:
         - targets: []
 
-rule_files: []
+rule_files:
+  - '/etc/prometheus/rules/*.yml'
 
 scrape_configs:
   # Prometheus self-monitoring
